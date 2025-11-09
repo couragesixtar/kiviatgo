@@ -17,11 +17,8 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
   // CES VARIABLES DOIVENT ÊTRE DANS LE DASHBOARD NETLIFY
   const CLIENT_ID = process.env.VITE_STRAVA_CLIENT_ID;
   const CLIENT_SECRET = process.env.VITE_STRAVA_CLIENT_SECRET;
-  // --- NOUVEAU (1) : Lire l'URI de redirection ---
-  const REDIRECT_URI = process.env.VITE_STRAVA_REDIRECT_URI;
 
-  // --- MODIFIÉ (2) : Vérifier les 3 variables ---
-  if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
      return { statusCode: 500, body: JSON.stringify({ error: 'Strava credentials not configured on server' }) };
   }
 
@@ -35,13 +32,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
         client_secret: CLIENT_SECRET,
         code: code,
         grant_type: 'authorization_code',
-        // --- NOUVEAU (3) : La ligne manquante exigée par Strava ---
-        redirect_uri: REDIRECT_URI,
       }),
     });
 
     if (!tokenResponse.ok) {
-      // Cette ligne capture l'erreur {"error":"Strava token error: Bad Request"}
       const errorData = await tokenResponse.json();
       return { statusCode: 400, body: JSON.stringify({ error: `Strava token error: ${errorData.message}` }) };
     }
