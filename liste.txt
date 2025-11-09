@@ -1,0 +1,225 @@
+🦋 KiviatGo - Liste des fonctionnalités à implémenter
+
+=== INFRASTRUCTURE & BACKEND ===
+
+🔥 Firebase Configuration
+- [ ] Configurer Firebase Auth (email/password + Google)
+- [ ] Configurer Cloud Firestore avec collections :
+  * users (profils utilisateurs)
+  * meals (repas avec photos avant/après)
+  * progress (historique poids/masse grasse/muscle)
+  * coach_tips (astuces de coach)
+- [ ] Configurer Firebase Storage pour les photos
+- [ ] Règles de sécurité Firestore
+- [ ] Variables d'environnement Firebase
+
+🤖 Intelligence Artificielle
+- [ ] Intégration API Gemini pour analyse des photos de repas
+- [ ] Système de reconnaissance des aliments
+- [ ] Calcul automatique des macronutriments
+- [ ] Algorithme de soustraction photo AVANT/APRÈS
+- [ ] Limitation à 25 analyses par jour par utilisateur
+
+=== FONCTIONNALITÉS PRINCIPALES ===
+
+📸 Module d'Analyse des Repas
+- [ ] Upload photo AVANT vers Firebase Storage
+- [ ] Envoi à l'API Gemini pour analyse
+- [ ] Interface de saisie des quantités (louches/portions)
+- [ ] Upload photo APRÈS
+- [ ] Calcul automatique des différences
+- [ ] Sauvegarde en base de données
+- [ ] Feedback utilisateur avec macros calculées
+
+📊 Système de Données Réelles
+- [ ] Remplacement des données mockées par Firebase
+- [ ] Calculs IMC en temps réel
+- [ ] Suivi des objectifs caloriques quotidiens
+- [ ] Historique des pesées Basic-Fit
+- [ ] Graphiques avec données réelles (Recharts)
+- [ ] Synchronisation temps réel
+
+🎯 Fonctionnalités Avancées
+- [ ] Système de notifications push
+- [ ] Mode hors-ligne complet avec synchronisation
+- [ ] Export des données (PDF/CSV)
+- [ ] Partage des progrès sur réseaux sociaux
+- [ ] Système de badges/récompenses
+- [ ] Rappels personnalisés
+
+=== OPTIMISATIONS & TESTS ===
+
+⚡ Performance
+- [ ] Optimisation des images (compression, lazy loading)
+- [ ] Cache intelligent des données
+- [ ] Optimisation bundle size
+- [ ] Service Worker avancé
+- [ ] Préchargement des données critiques
+
+🧪 Tests & Qualité
+- [ ] Tests unitaires (Jest/Vitest)
+- [ ] Tests d'intégration Firebase
+- [ ] Tests PWA (installation, offline)
+- [ ] Tests de performance mobile
+- [ ] Tests d'accessibilité
+- [ ] Tests cross-browser
+
+📱 PWA Avancée
+- [ ] Notifications push natives
+- [ ] Synchronisation en arrière-plan
+- [ ] Partage natif (Web Share API)
+- [ ] Raccourcis d'application
+- [ ] Intégration caméra native
+
+=== DESIGN & UX ===
+
+🎨 Améliorations Visuelles
+- [ ] Animations micro-interactions avancées
+- [ ] Thème sombre/clair automatique
+- [ ] Personnalisation couleurs utilisateur
+- [ ] Illustrations custom (remplacer emojis)
+- [ ] Skeleton loaders
+- [ ] États de chargement élégants
+
+📐 Responsive Design
+- [ ] Optimisation tablette
+- [ ] Mode paysage mobile
+- [ ] Adaptation écrans larges
+- [ ] Tests sur différents devices
+- [ ] Optimisation touch/gestures
+
+=== SÉCURITÉ & CONFORMITÉ ===
+
+🔒 Sécurité
+- [ ] Validation côté serveur
+- [ ] Chiffrement des données sensibles
+- [ ] Rate limiting API
+- [ ] Protection CSRF
+- [ ] Audit sécurité
+
+📋 Conformité
+- [ ] RGPD compliance
+- [ ] Politique de confidentialité
+- [ ] Conditions d'utilisation
+- [ ] Gestion consentements cookies
+- [ ] Export/suppression données utilisateur
+
+=== DÉPLOIEMENT ===
+
+🚀 Production
+- [ ] Configuration environnements (dev/staging/prod)
+- [ ] CI/CD Pipeline
+- [ ] Monitoring erreurs (Sentry)
+- [ ] Analytics (Google Analytics 4)
+- [ ] SEO optimization
+- [ ] Certificats SSL
+- [ ] CDN configuration
+
+📈 Monitoring
+- [ ] Métriques performance
+- [ ] Logs centralisés
+- [ ] Alertes système
+- [ ] Backup automatique
+- [ ] Plan de reprise d'activité
+
+=== FONCTIONNALITÉS BONUS ===
+
+🎮 Gamification
+- [ ] Système de points/XP
+- [ ] Défis quotidiens/hebdomadaires
+- [ ] Classements entre amis
+- [ ] Streaks (séries de jours consécutifs)
+- [ ] Récompenses virtuelles
+
+🤝 Social
+- [ ] Partage de repas
+- [ ] Communauté d'entraide
+- [ ] Coach virtuel IA avancé
+- [ ] Recettes personnalisées
+- [ ] Groupes d'objectifs
+
+📊 Analytics Avancées
+- [ ] Prédictions IA (poids futur)
+- [ ] Recommandations personnalisées
+- [ ] Analyse des habitudes
+- [ ] Rapports détaillés
+- [ ] Comparaisons temporelles
+
+=== NOTES TECHNIQUES ===
+
+🔧 Architecture Actuelle
+- React 18 + TypeScript
+- Tailwind CSS + Framer Motion
+- React Router DOM
+- Recharts pour graphiques
+- Lucide React pour icônes
+- Context API pour état global
+
+📦 Packages à Ajouter
+- Firebase SDK
+- React Query/SWR (cache)
+- React Hook Form (formulaires)
+- Zod (validation)
+- Date-fns (dates)
+- React Intersection Observer
+- Workbox (PWA avancée)
+
+=== PRIORITÉS RECOMMANDÉES ===
+
+🥇 Phase 1 (Critique)
+1. Configuration Firebase complète
+2. Authentification réelle
+3. Sauvegarde données utilisateur
+4. Module analyse repas basique
+
+🥈 Phase 2 (Important)
+1. API Gemini intégration
+2. Graphiques données réelles
+3. PWA notifications
+4. Tests principaux
+
+🥉 Phase 3 (Nice to have)
+1. Fonctionnalités sociales
+2. Gamification
+3. Analytics avancées
+4. Optimisations performance
+
+=== ESTIMATION TEMPS ===
+
+⏱️ Développement estimé : 3-4 mois
+- Phase 1 : 6-8 semaines
+- Phase 2 : 4-6 semaines  
+- Phase 3 : 2-4 semaines
+- Tests & déploiement : 2 semaines
+
+Bon courage champion ! 💪🦋
+
+
+enregistrement des images :
+
+import { useState } from "react";
+
+export default function UploadImage() {
+  const [imageUrl, setImageUrl] = useState("");
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("https://upload.uploadcare.com/base/", {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await res.json();
+    setImageUrl(`https://ucarecdn.com/${data.file}/`);
+  };
+
+  return (
+    <div>
+      <input type="file" onChange={handleUpload} />
+      {imageUrl && <img src={imageUrl} alt="uploaded" width={200} />}
+    </div>
+  );
+}
