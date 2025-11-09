@@ -14,8 +14,8 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
   const { code } = JSON.parse(event.body);
 
   // ⚠️ Ces variables DOIVENT être configurées dans le dashboard Netlify
-  const CLIENT_ID = process.env.STRAVA_CLIENT_ID;
-  const CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
+  const CLIENT_ID = process.env.VITE_STRAVA_CLIENT_ID;
+  const CLIENT_SECRET = process.env.VITE_STRAVA_CLIENT_SECRET;
 
   if (!CLIENT_ID || !CLIENT_SECRET) {
     console.error("❌ Strava credentials missing on server");
