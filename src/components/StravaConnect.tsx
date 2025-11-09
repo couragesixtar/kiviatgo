@@ -1,76 +1,82 @@
 // src/components/StravaConnect.tsx
-
-import { useAuth } from '../contexts/AuthContext';
-import { CheckCircle } from 'lucide-react'; // Ajout de l'icône
-
-// L'URL de l'image Strava (vous pouvez la garder ou la supprimer si vous préférez)
-const stravaIconUrl = "https://kiviatgo.netlify.app/strava_icon.png"; // Assurez-vous que ce lien est correct
+import { Activity } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext'; // On l'utilise pour savoir s'il est déjà connecté
 
 export const StravaConnect = () => {
   const { user } = useAuth();
 
-  const handleConnect = () => {
-    // Portée : lire les activités
-    const scope = 'activity:read'; 
-    // L'URL de redirection (là où Strava renvoie l'utilisateur)
-    // Doit correspondre EXACTEMENT à ce qui est configuré dans votre app Strava
-    const redirectUri = window.location.origin + '/strava-auth'; 
-    
-    // Votre Client ID Strava (doit être dans les variables d'environnement VITE)
-    const clientId = (import.meta as any).env.VITE_STRAVA_CLIENT_ID;
+  // On vérifie si l'utilisateur a déjà des données Strava synchronisées
+  const isConnected = !!(user as any)?.daily?.stravaLastSync;
 
-    if (!clientId) {
-      console.error("VITE_STRAVA_CLIENT_ID n'est pas défini !");
-      alert("Erreur: La connexion Strava n'est pas configurée (CLIENT_ID manquant).");
-      return;
-    }
+  // --- DÉBUT DE LA MODIFICATION (Logique déplacée) ---
+  // On définit ces variables POUR TOUS LES CAS (connecté ou non)
+  // pour que le lien de resynchronisation soit toujours disponible.
+  
+  // 1. Lire les variables d'environnement
+  const clientId = import.meta.env.VITE_STRAVA_CLIENT_ID;
+  const redirectUri = import.meta.env.VITE_STRAVA_REDIRECT_URI;
+  
+  // 2. Définir les "scopes" (ce qu'on veut lire)
+  const scope = 'activity:read';
+  
+  // 3. Construire l'URL d'autorisation
+  // On ajoute 'approval_prompt=auto' pour que Strava ne demande pas
+  // la permission à chaque resynchronisation, il le fait auto.
+  const authUrl = `https://www.strava.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
+    redirectUri
+  )}&response_type=code&scope=${encodeURIComponent(scope)}&approval_prompt=auto`;
+  // --- FIN DE LA MODIFICATION (Logique déplacée) ---
 
-    const authUrl = `https://www.strava.com/oauth/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&approval_prompt=auto&scope=${encodeURIComponent(scope)}`;
-    
-    // Redirige l'utilisateur vers la page d'autorisation Strava
-    window.location.href = authUrl;
-  };
 
-  const hasStrava = user?.daily?.stravaLastSync;
-  const lastSyncDate = hasStrava ? new Date(user.daily.stravaLastSync) : null;
+  if (isConnected) {
+    // CAS 1: Déjà connecté
+    const lastSyncDate = new Date((user as any).daily.stravaLastSync).toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
 
-  // --- DÉBUT DE LA MODIFICATION ---
-
-  if (hasStrava && lastSyncDate) {
-    // CAS 1: Déjà connecté -> Afficher le statut ET le bouton "Resynchroniser"
     return (
-      <div className="flex items-center justify-between">
-        {/* Partie gauche : Statut */}
-        <div className="flex items-center space-x-3">
-          <CheckCircle size={20} className="text-green-400 flex-shrink-0" />
-          <div>
-            <p className="text-white font-medium">Connecté à Strava</p>
-            <p className="text-gray-400 text-sm">
-              Dernière synchro: {lastSyncDate.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-            </p>
+      // On utilise un fragment (<>) pour renvoyer DEUX éléments
+      <>
+        {/* 1. Le statut (votre code original) */}
+        <div className="bg-dark-800/50 backdrop-blur-sm rounded-2xl p-4 border border-green-500/30 mb-4"> {/* Ajout de mb-4 pour espacer */}
+          <div className="flex items-center space-x-3">
+            <Activity size={24} className="text-green-400" />
+            <div>
+              <p className="text-white font-medium">Strava Connecté !</p>
+              <p className="text-gray-400 text-sm">
+                Dernière synchro: {lastSyncDate}
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* Partie droite : Bouton Resynchroniser */}
-        <button
-          onClick={handleConnect} // On réutilise la même fonction de connexion
-          className="px-4 py-2 bg-dark-700 text-white text-sm rounded-xl hover:bg-dark-600 transition-colors flex-shrink-0"
+        {/* 2. Le NOUVEAU bouton "Resynchroniser" */}
+        <a
+          href={authUrl} // On utilise la même URL d'autorisation
+          className="block bg-dark-700 hover:bg-dark-600 text-white font-bold py-3 px-4 rounded-xl text-center transition-colors duration-200"
         >
-          Resynchroniser
-        </button>
-      </div>
-    );
-  } else {
-    // CAS 2: Pas connecté -> Afficher le bouton de connexion
-    return (
-      <button
-        onClick={handleConnect}
-        className="w-full bg-[#FC4C02] text-white font-bold py-3 px-4 rounded-2xl flex items-center justify-center space-x-2 transition-opacity duration-200 hover:opacity-90"
-      >
-        <img src={stravaIconUrl} alt="Strava" className="w-6 h-6" />
-        <span>Connecter Strava</span>
-      </button>
+          <div className="flex items-center justify-center space-x-2">
+            <Activity size={20} />
+            <span>Mettre à jour (Resynchroniser)</span>
+          </div>
+        </a>
+      </>
     );
   }
-  // --- FIN DE LA MODIFICATION ---
+
+  // CAS 2: Si pas connecté, on affiche le bouton de connexion (inchangé)
+  return (
+    <a
+      href={authUrl}
+      className="block bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-xl text-center transition-colors duration-200"
+    >
+      <div className="flex items-center justify-center space-x-2">
+        <Activity size={20} />
+        <span>Connecter Strava</span>
+      </div>
+    </a>
+  );
 };
