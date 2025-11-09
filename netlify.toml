@@ -1,5 +1,2 @@
-# Ce fichier doit être à la RACINE de votre dépôt
-
 [build]
-
-  functions = "netlify/functions"
+functions = "netlify/functions"
