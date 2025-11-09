@@ -14,10 +14,12 @@ import {
   serverTimestamp,
   addDoc,
   collection,
-  updateDoc, // <-- AJOUTE-LE ICI
+  updateDoc,
+  onSnapshot, // <-- 1. IMPORTATION AJOUTÉE
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
+// ... (Interfaces UserDaily, User, AuthContextType restent identiques) ...
 interface UserDaily {
   caloriesConsumed?: number;
   proteinConsumed?: number;
@@ -46,11 +48,8 @@ interface User {
   isOnboardingComplete: boolean;
   createdAt?: any;
   updatedAt?: any;
-  
-  // --- AJOUTS REQUIS ---
-  targetWeight?: number; // Pour corriger l'erreur de Profile.tsx
-  daily?: UserDaily;     // Pour corriger l'erreur de StravaAuth.tsx (et AuthContext lui-même)
-  // --- FIN DES AJOUTS ---
+  targetWeight?: number;
+  daily?: UserDaily;
 }
 
 interface AuthContextType {
@@ -61,8 +60,9 @@ interface AuthContextType {
   updateUser: (userData: Partial<User>) => Promise<void>;
   completeOnboarding: () => Promise<void>;
   logout: () => Promise<void>;
-  createProgress: (data: { weight: number; bodyFat?: number; muscleMass?: number; date?: any }) => Promise<void>; // ajouté
+  createProgress: (data: { weight: number; bodyFat?: number; muscleMass?: number; date?: any }) => Promise<void>;
 }
+
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -84,6 +84,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   // helper pour retirer undefined (préserve objets imbriqués)
   const removeUndefined = (obj: any) => {
+    // ... (code inchangé) ...
     if (!obj || typeof obj !== 'object') return obj;
     const out: any = Array.isArray(obj) ? [] : {};
     Object.keys(obj).forEach(k => {
@@ -96,174 +97,147 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
+    // --- 2. DÉBUT DE LA CORRECTION MAJEURE ---
+    
+    let unsubscribeFromSnapshot: (() => void) | null = null; // Pour arrêter l'écoute
+
+    const unsubscribeFromAuth = onAuthStateChanged(auth, (fbUser: FirebaseUser | null) => {
+      
+      // Si on se déconnecte, on arrête d'écouter le snapshot précédent
+      if (unsubscribeFromSnapshot) {
+        unsubscribeFromSnapshot();
+        unsubscribeFromSnapshot = null;
+      }
+
       if (fbUser) {
         const uid = fbUser.uid;
         const userRef = doc(db, 'users', uid);
 
-        try {
-          const snap = await getDoc(userRef);
-          if (snap.exists()) {
-            const data = snap.data() as any;
+        // On remplace le getDoc par un onSnapshot
+        unsubscribeFromSnapshot = onSnapshot(userRef, async (snap) => {
+          try {
+            if (snap.exists()) {
+              const data = snap.data() as any;
 
-            // Normalisation et reset quotidien côté serveur si nécessaire
-            const today = new Date().toISOString().slice(0, 10);
-            const daily = data.daily ?? {};
-            const lastReset = daily.lastResetDate ?? null;
+              // Normalisation et reset quotidien côté serveur si nécessaire
+              const today = new Date().toISOString().slice(0, 10);
+              const daily = data.daily ?? {};
+              const lastReset = daily.lastResetDate ?? null;
 
-            if (lastReset !== today) {
-              const resetDaily = {
-                caloriesConsumed: 0,
-                proteinConsumed: 0,
-                photosCount: 0,
-                photosDate: today,
-                lastResetDate: today
+              if (lastReset !== today) {
+                const resetDaily = {
+                  caloriesConsumed: 0,
+                  proteinConsumed: 0,
+                  photosCount: 0,
+                  photosDate: today,
+                  lastResetDate: today
+                };
+                try {
+                  // Persist reset (merge)
+                  // On fait un updateDoc au lieu de setDoc pour être plus léger
+                  // (Cela déclenchera onSnapshot une 2e fois, c'est normal et géré)
+                  await updateDoc(userRef, { daily: resetDaily, updatedAt: serverTimestamp() });
+                  data.daily = { ...(data.daily || {}), ...resetDaily };
+                } catch (err) {
+                  console.warn('Impossible d\'appliquer reset daily', err);
+                }
+              } else {
+                // s'assurer que fields existent
+                data.daily = {
+                  photosCount: daily.photosCount ?? 0,
+                  photosDate: daily.photosDate ?? today,
+                  caloriesConsumed: daily.caloriesConsumed ?? 0,
+                  proteinConsumed: daily.proteinConsumed ?? 0,
+                  caloriesTarget: daily.caloriesTarget ?? undefined,
+                  proteinTarget: daily.proteinTarget ?? undefined,
+                  lastResetDate: daily.lastResetDate ?? today,
+                  ...daily
+                };
+              }
+
+              setUser({
+                id: data.id || uid,
+                firstName: data.firstName || '',
+                lastName: data.lastName || '',
+                email: data.email || fbUser.email || '',
+                age: data.age,
+                height: data.height,
+                weight: data.weight,
+                bodyFat: data.bodyFat,
+                muscleMass: data.muscleMass,
+                boneMass: data.boneMass,
+                calibrationPhoto: data.calibrationPhoto,
+                targetWeight: data.targetWeight,
+                daily: data.daily ?? {},
+                isOnboardingComplete: data.isOnboardingComplete || false,
+                createdAt: data.createdAt,
+                updatedAt: data.updatedAt
+              });
+              setIsAuthenticated(true);
+            } else {
+              // Pas de doc Firestore : créer minimal avec daily normalisé
+              const minimalUser = {
+                id: uid,
+                firstName: fbUser.displayName?.split(' ')[0] || '',
+                lastName: fbUser.displayName?.split(' ')[1] || '',
+                email: fbUser.email || '',
+                daily: {
+                  caloriesConsumed: 0,
+                  proteinConsumed: 0,
+                  photosCount: 0,
+                  photosDate: new Date().toISOString().slice(0,10),
+                  lastResetDate: new Date().toISOString().slice(0,10)
+                },
+                isOnboardingComplete: false,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
               };
               try {
-                // Persist reset (merge)
-                await setDoc(userRef, { daily: resetDaily, updatedAt: serverTimestamp() }, { merge: true });
-                data.daily = { ...(data.daily || {}), ...resetDaily };
+                // setDoc (pas updateDoc) car le doc n'existe pas
+                await setDoc(userRef, minimalUser, { merge: true });
               } catch (err) {
-                console.warn('Impossible d\'appliquer reset daily', err);
+                console.warn('Impossible d\'écrire le doc user (permissions) — fallback local', err);
               }
-            } else {
-              // s'assurer que fields existent
-              data.daily = {
-                photosCount: daily.photosCount ?? 0,
-                photosDate: daily.photosDate ?? today,
-                caloriesConsumed: daily.caloriesConsumed ?? 0,
-                proteinConsumed: daily.proteinConsumed ?? 0,
-                caloriesTarget: daily.caloriesTarget ?? undefined,
-                proteinTarget: daily.proteinTarget ?? undefined,
-                lastResetDate: daily.lastResetDate ?? today,
-                ...daily
-              };
+              // onSnapshot se redéclenchera après le setDoc, 
+              // donc pas besoin de setUser ici, mais on le laisse par sécurité.
+              setUser(minimalUser as any);
+              setIsAuthenticated(true);
             }
-
-            setUser({
-              id: data.id || uid,
-              firstName: data.firstName || '',
-              lastName: data.lastName || '',
-              email: data.email || fbUser.email || '',
-              age: data.age,
-              height: data.height,
-              weight: data.weight,
-              bodyFat: data.bodyFat,
-              muscleMass: data.muscleMass,
-              boneMass: data.boneMass,
-              calibrationPhoto: data.calibrationPhoto,
-              targetWeight: data.targetWeight,
-              daily: data.daily ?? {},
-              isOnboardingComplete: data.isOnboardingComplete || false,
-              createdAt: data.createdAt,
-              updatedAt: data.updatedAt
-            });
-            setIsAuthenticated(true);
-          } else {
-            // Pas de doc Firestore : créer minimal avec daily normalisé
-            const minimalUser = {
+          } catch (err: any) {
+            console.warn('Erreur dans onSnapshot (user)', err); // Message mis à jour
+            // fallback local minimal user
+            const fallbackUser = {
               id: uid,
               firstName: fbUser.displayName?.split(' ')[0] || '',
               lastName: fbUser.displayName?.split(' ')[1] || '',
               email: fbUser.email || '',
-              daily: {
-                caloriesConsumed: 0,
-                proteinConsumed: 0,
-                photosCount: 0,
-                photosDate: new Date().toISOString().slice(0,10),
-                lastResetDate: new Date().toISOString().slice(0,10)
-              },
-              isOnboardingComplete: false,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp()
+              daily: { caloriesConsumed: 0, proteinConsumed: 0, photosCount: 0, photosDate: new Date().toISOString().slice(0,10), lastResetDate: new Date().toISOString().slice(0,10) },
+              isOnboardingComplete: false
             };
-            try {
-              await setDoc(userRef, minimalUser, { merge: true });
-            } catch (err) {
-              console.warn('Impossible d\'écrire le doc user (permissions) — fallback local', err);
-            }
-            setUser(minimalUser as any);
+            setUser(fallbackUser as any);
             setIsAuthenticated(true);
           }
-        } catch (err: any) {
-          console.warn('Erreur lecture utilisateur firestore', err);
-          // fallback local minimal user
-          const fallbackUser = {
-            id: uid,
-            firstName: fbUser.displayName?.split(' ')[0] || '',
-            lastName: fbUser.displayName?.split(' ')[1] || '',
-            email: fbUser.email || '',
-            daily: { caloriesConsumed: 0, proteinConsumed: 0, photosCount: 0, photosDate: new Date().toISOString().slice(0,10), lastResetDate: new Date().toISOString().slice(0,10) },
-            isOnboardingComplete: false
-          };
-          setUser(fallbackUser as any);
-          setIsAuthenticated(true);
-        }
+        }); // Fin du onSnapshot
+
       } else {
         setUser(null);
         setIsAuthenticated(false);
       }
-    });
+    }); // Fin du onAuthStateChanged
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeFromAuth();
+      if (unsubscribeFromSnapshot) {
+        unsubscribeFromSnapshot();
+      }
+    };
+    // --- 2. FIN DE LA CORRECTION MAJEURE ---
   }, []);
 
   const login = async (email: string, password: string) => {
     try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      const uid = cred.user.uid;
-      const userRef = doc(db, 'users', uid);
-      try {
-        const snap = await getDoc(userRef);
-        if (snap.exists()) {
-          const data = snap.data() as any;
-          setUser({
-            id: data.id || uid,
-            firstName: data.firstName || '',
-            lastName: data.lastName || '',
-            email: data.email || email,
-            age: data.age,
-            height: data.height,
-            weight: data.weight,
-            bodyFat: data.bodyFat,
-            muscleMass: data.muscleMass,
-            boneMass: data.boneMass,
-            calibrationPhoto: data.calibrationPhoto,
-            isOnboardingComplete: data.isOnboardingComplete || false,
-            createdAt: data.createdAt,
-            updatedAt: data.updatedAt
-          });
-          setIsAuthenticated(true);
-          return;
-        } else {
-          // Pas de doc Firestore : fallback minimal pour lancer onboarding
-          const minimalUser = {
-            id: uid,
-            firstName: cred.user.displayName?.split(' ')[0] || '',
-            lastName: cred.user.displayName?.split(' ')[1] || '',
-            email,
-            age: undefined,
-            isOnboardingComplete: false
-          };
-          setUser(minimalUser as any);
-          setIsAuthenticated(true);
-          return;
-        }
-      } catch (err: any) {
-        // Erreur lecture Firestore -> fallback sur info Auth
-        console.warn('Erreur lecture firestore après login, fallback local', err);
-        const minimalUser = {
-          id: uid,
-          firstName: cred.user.displayName?.split(' ')[0] || '',
-          lastName: cred.user.displayName?.split(' ')[1] || '',
-          email,
-          age: undefined,
-          isOnboardingComplete: false
-        };
-        setUser(minimalUser as any);
-        setIsAuthenticated(true);
-        return;
-      }
+      // Le login ne change pas, car onAuthStateChanged s'occupe de charger les données
+      await signInWithEmailAndPassword(auth, email, password);
     } catch (error: any) {
       // Propager erreur pour UI si besoin
       throw error;
@@ -281,21 +255,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       const cleaned = removeUndefined(patch);
       // ajouter updatedAt
       cleaned.updatedAt = serverTimestamp();
-      // setDoc avec merge pour garder les champs existants (supporte nested objects comme daily)
-      await setDoc(userRef, cleaned, { merge: true });
+      
+      // --- CORRECTION : Utiliser updateDoc au lieu de setDoc(merge) ---
+      // C'est plus propre pour les objets imbriqués comme 'daily'
+      // setDoc(merge) peut écraser des sous-champs non spécifiés.
+      await updateDoc(userRef, cleaned);
 
-      // Mettre à jour le user local si présent
-      setUser(prev => {
-        if (!prev) return prev;
-        // shallow merge + deep merge pour daily si besoin
-        const merged = { ...prev, ...cleaned };
-        if (prev.daily && cleaned.daily) {
-          merged.daily = { ...prev.daily, ...cleaned.daily };
-        }
-        // s'assurer que targetWeight est pris en compte
-        if (cleaned.targetWeight !== undefined) merged.targetWeight = cleaned.targetWeight;
-        return merged;
-      });
+      // onSnapshot s'occupera de mettre à jour l'état local 'user'
+      // On retire l'ancien 'setUser' manuel
+      
       return;
     } catch (err) {
       console.warn('updateUser failed', err);
@@ -304,6 +272,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const register = async (userData: Partial<User> & { password?: string }) => {
+    // ... (Logique de register inchangée) ...
+    // Note: onAuthStateChanged et onSnapshot géreront le setUser
+    // (le code existant est OK)
     const { email, password, firstName = '', lastName = '', age } = userData as any;
     if (!email || !password) {
       throw new Error('Email et mot de passe requis.');
@@ -346,7 +317,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         console.warn('Impossible d\'écrire le doc user (permissions) — fallback local', err);
       }
 
-      setUser(newUser as any);
+      // (onSnapshot va maintenant gérer la mise à jour de l'état user)
+      // setUser(newUser as any); // (Optionnel, car onSnapshot le fera)
       setIsAuthenticated(true);
     } catch (error: any) {
       const code = error?.code || '';
@@ -397,8 +369,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
               console.warn('Erreur lecture userRef après sign-in', err);
             }
           }
-          // enfin, recharger l'état utilisateur via login helper
-          await login(email, password);
+          // (onAuthStateChanged gérera le setUser)
           return;
         } catch (err) {
           throw new Error('Cet e‑mail est déjà utilisé. Mot de passe incorrect ?');
@@ -416,19 +387,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const completeOnboarding = async () => {
+    // ... (code inchangé, updateDoc va déclencher onSnapshot) ...
     if (!auth.currentUser) return;
     const uid = auth.currentUser.uid;
     const userRef = doc(db, 'users', uid);
     try {
       await updateDoc(userRef, { isOnboardingComplete: true, updatedAt: serverTimestamp() } as any);
-      setUser(prev => prev ? ({ ...prev, isOnboardingComplete: true }) : prev);
+      // setUser(prev => prev ? ({ ...prev, isOnboardingComplete: true }) : prev); // (Retiré, onSnapshot gère)
     } catch (err: any) {
       console.warn('Impossible de mettre à jour onboarding sur Firestore (permissions) — update local seulement', err);
-      setUser(prev => prev ? ({ ...prev, isOnboardingComplete: true }) : prev);
+      setUser(prev => prev ? ({ ...prev, isOnboardingComplete: true }) : prev); // (On garde le fallback local)
     }
-  };
-
-  const logout = async () => {
+  };const logout = async () => {
     try {
       await signOut(auth);
       setUser(null);
