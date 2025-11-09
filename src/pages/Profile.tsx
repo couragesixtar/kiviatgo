@@ -1,6 +1,6 @@
 // src/pages/Profile.tsx
 
-import { useState, useEffect } from 'react'; // <-- useEffect est de retour
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { User, Scale, Target, LogOut, Save, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -28,19 +28,19 @@ export const Profile = () => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  // --- CORRECTION 1 : Le useEffect est de retour ---
-  // Il va synchroniser l'état local avec le contexte 'user' (live)
-  // lorsque 'user' est chargé ou mis à jour par onSnapshot.
   useEffect(() => {
     if (user) {
       setFirstName(user.firstName || '');
       setLastName(user.lastName || '');
-      setHeight(user.height || '');
-      setWeight(user.weight || '');
-      // On lit 'user.daily' (pour les données live) ET 'user' (pour le fallback)
-      setTargetWeight((user as any)?.daily?.targetWeight || user.targetWeight || '');
-      setCaloriesTarget((user as any)?.daily?.caloriesTarget || '');
-      setProteinTarget((user as any)?.daily?.proteinTarget || '');
+      
+      // --- DÉBUT DE LA CORRECTION (TypeScript) ---
+      // On convertit les 'number' en 'string' avant de les setter
+      setHeight(String(user.height || ''));
+      setWeight(String(user.weight || ''));
+      setTargetWeight(String((user as any)?.daily?.targetWeight || user.targetWeight || ''));
+      setCaloriesTarget(String((user as any)?.daily?.caloriesTarget || ''));
+      setProteinTarget(String((user as any)?.daily?.proteinTarget || ''));
+      // --- FIN DE LA CORRECTION ---
     }
   }, [user]); // Se synchronise quand l'objet 'user' du contexte change
 
