@@ -599,22 +599,30 @@ Réponds seulement par l'objet JSON demandé, en français.`;
 
     const subscribePrimary = () => {
       unsubPrimary = onSnapshot(qPrimary, (snap) => {
-        const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        setMeals(docs as any);
-        // --- NOUVEAU : calculer totaux des repas POUR AUJOURD'HUI et synchroniser user.daily ---
+        const allDocs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+
+        // --- DÉBUT DE LA CORRECTION (On charge TOUS les repas) ---
+        // On remet allDocs dans setMeals, le tri se fera dans le JSX
+        setMeals(allDocs as any);
+        // --- FIN DE LA CORRECTION ---
+
+        // --- MODIFIÉ : calculer totaux des repas POUR AUJOURD'HUI et synchroniser user.daily ---
         try {
           const today = new Date().toISOString().slice(0, 10);
           let sumCals = 0;
           let sumProt = 0;
-          for (const docItem of docs) {
+          
+          // On filtre 'allDocs' ici juste pour le calcul des totaux
+          for (const docItem of allDocs) { 
             const ts = docItem.createdAt;
             let dateStr = null;
             if (ts?.seconds) {
               dateStr = new Date(ts.seconds * 1000).toISOString().slice(0, 10);
             } else if (ts) {
-              dateStr = new Date(ts).toISOString().slice(0, 10);
+              try { dateStr = new Date(ts).toISOString().slice(0, 10); } catch(e){}
             }
-            if (dateStr === today) {
+            
+            if (dateStr === today) { // Le filtre est ici
               const c = Number(docItem.totalCalories ?? 0);
               const p = Number(docItem.totalProtein ?? 0);
               sumCals += c;
@@ -652,17 +660,24 @@ Réponds seulement par l'objet JSON demandé, en français.`;
               const tb = b.createdAt?.seconds ? b.createdAt.seconds * 1000 : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
               return tb - ta;
             });
+            
+            // --- DÉBUT DE LA CORRECTION (Fallback) ---
+            // On charge TOUS les repas (docs2)
             setMeals(docs2 as any);
+            // --- FIN DE LA CORRECTION (Fallback) ---
+            
             try {
               const today = new Date().toISOString().slice(0, 10);
               let sumCals = 0;
               let sumProt = 0;
+              // On filtre 'docs2' ici juste pour le calcul des totaux
               for (const docItem of docs2) {
                 const ts = docItem.createdAt;
                 let dateStr: string | null = null;
                 if (ts?.seconds) dateStr = new Date(ts.seconds * 1000).toISOString().slice(0, 10);
-                else if (ts) dateStr = new Date(ts).toISOString().slice(0, 10);
-                if (dateStr === today) {
+                else if (ts) try { dateStr = new Date(ts).toISOString().slice(0, 10); } catch(e){}
+                
+                if (dateStr === today) { // Le filtre est ici
                   sumCals += Number(docItem.totalCalories ?? 0);
                   sumProt += Number(docItem.totalProtein ?? 0);
                 }
@@ -1055,6 +1070,7 @@ Réponds UNIQUEMENT par le JSON demandé, sans explication, sans texte avant ni 
       const mealType = detectMealTypeFromHour(new Date().getHours());
       
       // 2. Récupérer les repas d'aujourd'hui depuis l'état 'meals' (qui est déjà chargé)
+      // (Nous devons filtrer 'meals' ici pour le chat, car 'meals' contient TOUT)
       const todayStr = new Date().toISOString().slice(0, 10);
       const todaysMeals = meals.filter(meal => {
         const ts = meal.createdAt;
@@ -1062,7 +1078,7 @@ Réponds UNIQUEMENT par le JSON demandé, sans explication, sans texte avant ni 
         if (ts?.seconds) {
           dateStr = new Date(ts.seconds * 1000).toISOString().slice(0, 10);
         } else if (ts) {
-          dateStr = new Date(ts).toISOString().slice(0, 10);
+          try { dateStr = new Date(ts).toISOString().slice(0, 10); } catch(e){}
         }
         return dateStr === todayStr;
       })
@@ -1173,6 +1189,91 @@ Coach:`;
     }
   };
 
+
+  // --- NOUVEAU: Logique de groupement des repas (Aujourd'hui / Hier / Anciens) ---
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterdayStr = yesterdayDate.toISOString().slice(0, 10);
+
+  // Helper pour extraire la date
+  const getMealDateStr = (meal: any) => {
+    const ts = meal.createdAt;
+    if (!ts) return null;
+    if (ts.seconds) return new Date(ts.seconds * 1000).toISOString().slice(0, 10);
+    // Gérer si ts est déjà une string (ex: auto-save) ou un objet Date
+    try {
+      return new Date(ts).toISOString().slice(0, 10);
+    } catch (e) { return null; }
+  };
+
+  const todaysMeals: any[] = [];
+  const yesterdaysMeals: any[] = [];
+  const olderMeals: any[] = [];
+
+  // 'meals' est déjà trié par 'createdAt: desc' grâce à la query Firestore
+  for (const meal of meals) {
+    const dateStr = getMealDateStr(meal);
+    if (dateStr === todayStr) {
+      todaysMeals.push(meal);
+    } else if (dateStr === yesterdayStr) {
+      yesterdaysMeals.push(meal);
+    } else if (dateStr) { // S'assurer qu'il y a une date
+      olderMeals.push(meal);
+    }
+  }
+
+  // --- NOUVEAU: Fonction pour afficher une carte de repas (éviter la duplication) ---
+  // (J'extrais le code de votre <motion.div> ici pour ne pas le répéter 3x)
+  const renderMealCard = (meal: any, index: number) => (
+    <motion.div
+      key={meal.id ?? `${meal.time}-${index}`}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.1 * (index + 3) }}
+      className="bg-dark-800/50 backdrop-blur-sm rounded-2xl p-4 border border-gray-600/30 relative cursor-pointer hover:border-primary-500/50"
+      onClick={() => {
+        setEditModalOpen(meal);
+        setEditedFoods(JSON.parse(JSON.stringify(meal.foods || [])));
+      }}
+    >
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setConfirmDeleteId(meal.id);
+        }}
+        className="absolute top-3 right-3 p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400"
+        aria-label="Supprimer le repas"
+      >
+        <Trash2 size={16} />
+      </button>
+      <div className="flex items-center space-x-4">
+        <img
+          src={meal.beforePhoto ?? meal.image ?? undefined}
+          alt={meal.type ?? meal.name ?? 'Repas'}
+          className="w-16 h-16 rounded-xl object-cover bg-dark-700"
+        />
+        <div className="flex-1">
+          <div className="flex items-center space-x-2 mb-1">
+            <Clock size={14} className="text-gray-400" />
+            <span className="text-gray-400 text-sm">
+              {meal.time
+                ?? (meal.createdAt?.seconds
+                  ? new Date(meal.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  : (meal.createdAt ? new Date(meal.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--')
+                )}
+            </span>
+          </div>
+          <h4 className="text-white font-semibold text-lg">
+            {meal.type || (meal.foods && meal.foods[0] ? meal.foods[0].name : 'Repas')}
+          </h4>
+          <p className="text-gray-400 text-sm">{meal.totalCalories ?? '--'} kcal • {meal.totalProtein ?? '--'}g P</p>
+        </div>
+      </div>
+    </motion.div>
+  );
+
+
   return (
     <>
       <div className="p-6 pt-12">
@@ -1209,88 +1310,86 @@ Coach:`;
           </div>
         </motion.div>
 
-        {/* Meals History */}
+        {/* --- DÉBUT: NOUVEAU BLOC "Meals History" (AVEC GROUPEMENT) --- */}
         <div className="space-y-4 mb-24">
-          {meals && meals.length > 0 ? (
-            (() => {
-              const source = meals;
-              const limit = showAll ? source.length : 3;
-              return source.slice(0, limit).map((meal: any, index: number) => (
-                <motion.div
-                  key={meal.id ?? `${meal.time}-${index}`}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 * (index + 3) }}
-                  // --- MODIFIÉ ---
-                  className="bg-dark-800/50 backdrop-blur-sm rounded-2xl p-4 border border-gray-600/30 relative cursor-pointer hover:border-primary-500/50"
-                  onClick={() => {
-                    setEditModalOpen(meal);
-                    setEditedFoods(JSON.parse(JSON.stringify(meal.foods || [])));
-                  }}
-                >
-                  {/* BOUTON SUPPRIMER (Corrigé) */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation(); // --- MODIFIÉ ---
-                      setConfirmDeleteId(meal.id);
-                    }}
-                    className="absolute top-3 right-3 p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400"
-                    aria-label="Supprimer le repas"
+          {meals.length > 0 ? (
+            <>
+              {/* --- Section Aujourd'hui --- */}
+              {todaysMeals.length > 0 && (
+                <div className="space-y-4">
+                  {/* (Pas de titre pour "Aujourd'hui", c'est implicite) */}
+                  {todaysMeals.map(renderMealCard)}
+                </div>
+              )}
+
+              {/* --- Section Hier --- */}
+              {yesterdaysMeals.length > 0 && (
+                <div className="space-y-4">
+                  {/* Le séparateur que vous avez demandé */}
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.1 }}
+                    className="flex items-center space-x-3 pt-4"
                   >
-                    <Trash2 size={16} />
-                  </button>
-                  <div className="flex items-center space-x-4">
-                    {/* ... (code inchangé) ... */}
-                    <img
-                      src={meal.beforePhoto ?? meal.image ?? undefined}
-                      alt={meal.type ?? meal.name ?? 'Repas'}
-                      className="w-16 h-16 rounded-xl object-cover bg-dark-700" // Ajout bg-dark-700 pour fallback
-                    />
-                    <div className="flex-1">
-                      {/* HORLOGE (Corrigé) */}
-                      <div className="flex items-center space-x-2 mb-1">
-                        <Clock size={14} className="text-gray-400" />
-                        <span className="text-gray-400 text-sm">
-                          {meal.time
-                            ?? (meal.createdAt?.seconds
-                              ? new Date(meal.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                              : (meal.createdAt ? new Date(meal.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--')
-                            )}
-                        </span>
-                      </div>
-                      
-                      <h4 className="text-white font-semibold text-lg">
-                        {meal.type || (meal.foods && meal.foods[0] ? meal.foods[0].name : 'Repas')}
-                      </h4>
-                      <p className="text-gray-400 text-sm">{meal.totalCalories ?? '--'} kcal • {meal.totalProtein ?? '--'}g P</p>
+                    <span className="text-gray-400 font-semibold">Hier</span>
+                    <hr className="flex-1 border-t-2 border-dashed border-gray-700" />
+                  </motion.div>
+                  {yesterdaysMeals.map(renderMealCard)}
+                </div>
+              )}
+              
+              {/* --- Section Plus Anciens --- */}
+              {olderMeals.length > 0 && (
+                <div className="space-y-4">
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.2 }}
+                    className="flex items-center space-x-3 pt-4"
+                  >
+                    <span className="text-gray-400 font-semibold">Plus anciens</span>
+                    <hr className="flex-1 border-t-2 border-dashed border-gray-700" />
+                  </motion.div>
+                  
+                  {/* On applique la logique "showAll" uniquement aux anciens repas */}
+                  {(() => {
+                    const limit = showAll ? olderMeals.length : 3;
+                    return olderMeals.slice(0, limit).map(renderMealCard);
+                  })()}
+                  
+                  {olderMeals.length > 3 && (
+                    <div className="flex items-center justify-center mt-4">
+                      <button
+                        onClick={() => setShowAll(prev => !prev)}
+                        className="text-sm text-primary-400 hover:underline"
+                      >
+                        {showAll ? '◀︎ Réduire' : '---------- afficher plus -------- ▶︎'}
+                      </button>
                     </div>
-                  </div>
-                </motion.div>
-              ));
-            })()
+                  )}
+                </div>
+              )}
+              
+              {/* Si on n'a pas de repas aujourd'hui, mais qu'on en a d'hier/avant */}
+              {todaysMeals.length === 0 && (yesterdaysMeals.length > 0 || olderMeals.length > 0) && (
+                <p className="text-gray-400 text-center text-sm py-4">
+                  Aucun repas enregistré aujourd'hui.
+                </p>
+              )}
+
+            </>
           ) : (
-            // EMPTY STATE when no meals
+            // --- Empty State (Si AUCUN repas n'existe) ---
             <div className="bg-dark-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-600/30 text-center">
-              {/* ... (code inchangé) ... */}
               <div className="text-4xl mb-3">🍽️</div>
               <h3 className="text-white font-semibold mb-2">Aucun repas enregistré</h3>
               <p className="text-gray-300 mb-0">Téléverse une photo ou crée ton plateau manuellement pour l'afficher ici.</p>
             </div>
           )}
-
-          {/* afficher plus / réduire */}
-          {meals && meals.length > 3 && (
-            <div className="flex items-center justify-center mt-4">
-              {/* ... (code inchangé) ... */}
-              <button
-                onClick={() => setShowAll(prev => !prev)}
-                className="text-sm text-primary-400 hover:underline"
-              >
-                {showAll ? '◀︎ Réduire' : '---------- afficher plus -------- ▶︎'}
-              </button>
-            </div>
-          )}
         </div>
+        {/* --- FIN: NOUVEAU BLOC "Meals History" --- */}
+
 
         {/* MODIFIÉ (Req 5): Floating Action Button -> remplace l'ancien FAB simple par FAB animé */}
         <div className="fixed bottom-24 right-6 z-50">
@@ -1699,7 +1798,8 @@ Coach:`;
               )}
               
               <p className="text-sm text-gray-400 -mt-2 mb-4">
-                Repas du {new Date(editModalOpen.createdAt?.seconds * 1000).toLocaleDateString('fr-FR')} à {editModalOpen.time}
+                {/* Sécurisation de l'affichage de la date */}
+                Repas du {editModalOpen.createdAt?.seconds ? new Date(editModalOpen.createdAt.seconds * 1000).toLocaleDateString('fr-FR') : 'Date inconnue'} à {editModalOpen.time}
               </p>
               
               <h4 className="text-white font-medium">Éléments du repas</h4>
