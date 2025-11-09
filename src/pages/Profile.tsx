@@ -1,6 +1,6 @@
 // src/pages/Profile.tsx
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react'; // 'useEffect' a été retiré
 import { motion } from 'framer-motion';
 import { User, Scale, Target, LogOut, Save, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,46 +11,33 @@ export const Profile = () => {
   const { user, updateUser, logout } = useAuth();
   const navigate = useNavigate();
   
-  // États locaux pour le formulaire, initialisés à vide par défaut
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
+  // États locaux pour le formulaire, initialisés avec les données de l'utilisateur
+  // C'est suffisant, pas besoin de useEffect pour ça
+  const [firstName, setFirstName] = useState(user?.firstName || '');
+  const [lastName, setLastName] = useState(user?.lastName || '');
   
   // Infos physiques
-  const [height, setHeight] = useState('');
-  const [weight, setWeight] = useState('');
+  const [height, setHeight] = useState(user?.height || '');
+  const [weight, setWeight] = useState(user?.weight || '');
   
-  // Objectifs
-  const [targetWeight, setTargetWeight] = useState('');
-  const [caloriesTarget, setCaloriesTarget] = useState('');
-  const [proteinTarget, setProteinTarget] = useState('');
+  // Objectifs (stockés dans user.daily ou à la racine)
+  const [targetWeight, setTargetWeight] = useState((user as any)?.daily?.targetWeight || user?.targetWeight || '');
+  const [caloriesTarget, setCaloriesTarget] = useState((user as any)?.daily?.caloriesTarget || '');
+  const [proteinTarget, setProteinTarget] = useState((user as any)?.daily?.proteinTarget || '');
 
   const [isLoading, setIsLoading] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (user) {
-      setFirstName(user.firstName || '');
-      setLastName(user.lastName || '');
-      
-      // --- DÉBUT DE LA CORRECTION (TypeScript) ---
-      // On convertit les 'number' en 'string' avant de les setter
-      setHeight(String(user.height || ''));
-      setWeight(String(user.weight || ''));
-      setTargetWeight(String((user as any)?.daily?.targetWeight || user.targetWeight || ''));
-      setCaloriesTarget(String((user as any)?.daily?.caloriesTarget || ''));
-      setProteinTarget(String((user as any)?.daily?.proteinTarget || ''));
-      // --- FIN DE LA CORRECTION ---
-    }
-  }, [user]); // Se synchronise quand l'objet 'user' du contexte change
-
+  // --- CORRECTION 1 : Le bloc useEffect qui dépendait de [user] a été supprimé ---
+  // Il était la cause du problème de re-focus des inputs.
 
   const handleSaveProfile = async () => {
     setIsLoading(true);
     setSaveMessage(null);
     try {
       
-      // On récupère l'objet 'daily' existant
+      // --- CORRECTION 2 : On récupère l'objet 'daily' existant ---
       const existingDaily = (user as any)?.daily || {};
       
       const updatedData = {
@@ -59,18 +46,18 @@ export const Profile = () => {
         height: Number(height) || undefined,
         weight: Number(weight) || undefined,
         
-        // On fusionne avec les nouvelles valeurs
+        // --- ...et on le fusionne avec les nouvelles valeurs ---
         daily: { 
-          ...existingDaily, // Préserve caloriesConsumed, strava, etc.
+          ...existingDaily, // Cela préserve caloriesConsumed, strava, etc.
           targetWeight: Number(targetWeight) || undefined,
           caloriesTarget: Number(caloriesTarget) || undefined,
           proteinTarget: Number(proteinTarget) || undefined,
         },
-        // On met aussi à jour le 'targetWeight' racine
+        // On met aussi à jour le 'targetWeight' racine pour l'historique
         targetWeight: Number(targetWeight) || undefined,
       };
       
-      await updateUser(updatedData); //
+      await updateUser(updatedData);
       setSaveMessage('Profil sauvegardé avec succès !');
     } catch (error) {
       console.error('Erreur sauvegarde profil:', error);
@@ -84,7 +71,9 @@ export const Profile = () => {
   const handleLogout = async () => {
     setIsLoggingOut(true);
     try {
-      await logout(); //
+      await logout();
+      // Après logout, AuthProvider redirigera vers AuthWrapper
+      // mais on peut forcer pour plus de réactivité
       navigate('/'); 
     } catch (error) {
       console.error('Erreur déconnexion:', error);
@@ -118,7 +107,7 @@ export const Profile = () => {
 
 
   return (
-    <div className="p-6 pt-12 pb-24">
+    <div className="p-6 pt-12 pb-24"> {/* Ajout padding bottom pour le FAB */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -162,7 +151,7 @@ export const Profile = () => {
               label="Email"
               icon={User}
               type="email"
-              value={user.email} // Toujours lire l'email direct du 'user'
+              value={user.email}
               disabled
               readOnly
               className="w-full bg-dark-900/50 border border-gray-700 rounded-xl py-3 pl-10 pr-4 text-gray-400 cursor-not-allowed"
