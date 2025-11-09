@@ -4,7 +4,7 @@ import { TrendingDown, Target, Calendar } from 'lucide-react';
 import { CoachTip } from '../components/CoachTip';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 export const Charts = () => {
