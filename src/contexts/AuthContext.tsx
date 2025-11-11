@@ -15,11 +15,10 @@ import {
   addDoc,
   collection,
   updateDoc,
-  onSnapshot, // <-- 1. IMPORTATION AJOUTÉE
+  onSnapshot,
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
-// ... (Interfaces UserDaily, User, AuthContextType restent identiques) ...
 interface UserDaily {
   caloriesConsumed?: number;
   proteinConsumed?: number;
@@ -31,6 +30,7 @@ interface UserDaily {
   targetWeight?: number;
   stravaRecentCalories?: number;
   stravaLastSync?: string | Date;
+  stravaRefreshToken?: string; // <-- CHAMP AJOUTÉ
 }
 
 interface User {
@@ -61,6 +61,8 @@ interface AuthContextType {
   completeOnboarding: () => Promise<void>;
   logout: () => Promise<void>;
   createProgress: (data: { weight: number; bodyFat?: number; muscleMass?: number; date?: any }) => Promise<void>;
+  syncStrava: () => Promise<void>; // <-- AJOUTÉ
+  isSyncingStrava: boolean; // <-- AJOUTÉ
 }
 
 
@@ -81,10 +83,10 @@ interface AuthProviderProps {
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isSyncingStrava, setIsSyncingStrava] = useState(false); // <-- ÉTAT AJOUTÉ
 
   // helper pour retirer undefined (préserve objets imbriqués)
   const removeUndefined = (obj: any) => {
-    // ... (code inchangé) ...
     if (!obj || typeof obj !== 'object') return obj;
     const out: any = Array.isArray(obj) ? [] : {};
     Object.keys(obj).forEach(k => {
@@ -96,14 +98,83 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     return out;
   };
 
+  // UNIQUE implémentation de updateUser
+  const updateUser = async (patch: any) => {
+    if (!auth.currentUser) {
+      throw new Error('Utilisateur non authentifié');
+    }
+    const uid = auth.currentUser.uid;
+    const userRef = doc(db, 'users', uid);
+    try {
+      const cleaned = removeUndefined(patch);
+      cleaned.updatedAt = serverTimestamp();
+      
+      // Utiliser updateDoc pour fusionner correctement les objets imbriqués
+      await updateDoc(userRef, cleaned);
+      // onSnapshot s'occupera de mettre à jour l'état local 'user'
+
+    } catch (err) {
+      console.warn('updateUser failed', err);
+      throw err;
+    }
+  };
+
+  // --- NOUVELLE FONCTION DE SYNCHRO ---
+  // On lui passe 'existingUser' pour la synchro auto au démarrage,
+  // sinon elle utilise le 'user' de l'état (pour le bouton manuel)
+  const syncStrava = async (existingUser?: User | null) => {
+    const currentUser = existingUser || user;
+    if (isSyncingStrava || !currentUser) return;
+
+    const currentRefreshToken = (currentUser as any)?.daily?.stravaRefreshToken;
+    if (!currentRefreshToken) {
+      console.log('Sync Strava: Pas de refresh token. Arrêt.');
+      return;
+    }
+
+    console.log('Sync Strava: Démarrage de la synchronisation...');
+    setIsSyncingStrava(true);
+    try {
+      const response = await fetch('/.netlify/functions/strava-token-exchange', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken: currentRefreshToken }), // On envoie le refresh token
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        // Si le refresh token est invalide (ex: révoqué par l'utilisateur), on le supprime
+        if (response.status === 400 && errorData.error.includes('refresh token')) {
+          console.warn('Refresh token Strava invalide. Suppression du token.');
+          await updateUser({ daily: { stravaRefreshToken: undefined } } as any);
+        }
+        throw new Error(`Échec du rafraîchissement du token Strava: ${errorData.error}`);
+      }
+
+      const data = await response.json();
+      const { totalCalories, lastSync, refreshToken: newRefreshToken } = data;
+
+      // On met à jour le profil avec les nouvelles données ET le nouveau token
+      await updateUser({
+        daily: {
+          stravaRecentCalories: totalCalories,
+          stravaLastSync: lastSync,
+          stravaRefreshToken: newRefreshToken, // IMPORTANT: On sauvegarde le nouveau token
+        },
+      } as any);
+      console.log('Sync Strava: Synchronisation réussie.');
+
+    } catch (err) {
+      console.error('Erreur syncStrava:', err);
+    } finally {
+      setIsSyncingStrava(false);
+    }
+  };
+
   useEffect(() => {
-    // --- 2. DÉBUT DE LA CORRECTION MAJEURE ---
-    
-    let unsubscribeFromSnapshot: (() => void) | null = null; // Pour arrêter l'écoute
+    let unsubscribeFromSnapshot: (() => void) | null = null;
 
     const unsubscribeFromAuth = onAuthStateChanged(auth, (fbUser: FirebaseUser | null) => {
       
-      // Si on se déconnecte, on arrête d'écouter le snapshot précédent
       if (unsubscribeFromSnapshot) {
         unsubscribeFromSnapshot();
         unsubscribeFromSnapshot = null;
@@ -113,52 +184,34 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         const uid = fbUser.uid;
         const userRef = doc(db, 'users', uid);
 
-        // On remplace le getDoc par un onSnapshot
         unsubscribeFromSnapshot = onSnapshot(userRef, async (snap) => {
           try {
             if (snap.exists()) {
               const data = snap.data() as any;
-
-              // Normalisation et reset quotidien côté serveur si nécessaire
               const today = new Date().toISOString().slice(0, 10);
-// src/contexts/AuthContext.tsx (dans le onSnapshot)
-
-// ...
               const daily = data.daily ?? {};
               const lastReset = daily.lastResetDate ?? null;
 
               if (lastReset !== today) {
-                
-                // --- C'ÉTAIT LE BUG ---
-                // const resetDaily = {
-                //   caloriesConsumed: 0,
-                //   proteinConsumed: 0,
-                //   // ...
-                // };
-                // await updateDoc(userRef, { daily: resetDaily, ... }); // <--- CELA ÉCRASE LES OBJECTIFS
-                // data.daily = { ...(data.daily || {}), ...resetDaily };
-
-
-                // --- VOICI LA CORRECTION ---
+                // --- CORRECTION DU BUG DE RESET ---
                 const existingDaily = data.daily ?? {}; // Récupère l'existant
                 
                 const mergedDaily = {
-                  ...existingDaily, // Garde les anciens (caloriesTarget, proteinTarget, strava...)
+                  ...existingDaily, // Garde (caloriesTarget, proteinTarget, strava...)
                   caloriesConsumed: 0, // Réinitialise seulement ce qui est nécessaire
                   proteinConsumed: 0,
                   photosCount: 0,
                   photosDate: today,
                   lastResetDate: today
                 };
+                // --- FIN CORRECTION ---
 
                 try {
-                  // Persiste la fusion
                   await updateDoc(userRef, { daily: mergedDaily, updatedAt: serverTimestamp() });
-                  data.daily = mergedDaily; // Met à jour l'état local avec la fusion
+                  data.daily = mergedDaily; 
                 } catch (err) {
                   console.warn('Impossible d\'appliquer reset daily', err);
-                  // En cas d'échec, on garde l'ancien 'daily' pour éviter les bugs
-                  data.daily = daily;
+                  data.daily = daily; // Fallback
                 }
               } else {
                 // s'assurer que fields existent
@@ -167,12 +220,32 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                   photosDate: daily.photosDate ?? today,
                   caloriesConsumed: daily.caloriesConsumed ?? 0,
                   proteinConsumed: daily.proteinConsumed ?? 0,
-                  caloriesTarget: daily.caloriesTarget ?? undefined,
-                  proteinTarget: daily.proteinTarget ?? undefined,
                   lastResetDate: daily.lastResetDate ?? today,
-                  ...daily
+                  ...daily // Garde le reste (targets, token strava...)
                 };
               }
+
+              // --- LOGIQUE DE SYNCHRO AUTOMATIQUE (1x par jour) ---
+              const stravaToken = data.daily?.stravaRefreshToken;
+              
+              if (stravaToken && !isSyncingStrava) { // Ne pas lancer si déjà en cours
+                const lastSync = data.daily?.stravaLastSync;
+                let lastSyncDate = '1970-01-01'; 
+                if (lastSync) {
+                  try {
+                    lastSyncDate = new Date(lastSync).toISOString().slice(0, 10);
+                  } catch(e) { /* ignore invalid date */ }
+                }
+
+                // Si la dernière synchro n'est pas d'aujourd'hui
+                if (lastSyncDate !== today) {
+                  console.log('Synchro Strava automatique (quotidienne) démarrée...');
+                  // On passe 'data' pour que syncStrava ait le token le plus récent
+                  const userForSync = { ...data, id: uid } as User;
+                  syncStrava(userForSync); // Ne pas "await"
+                }
+              }
+              // --- FIN DE LA LOGIQUE DE SYNCHRO AUTO ---
 
               setUser({
                 id: data.id || uid,
@@ -194,7 +267,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
               });
               setIsAuthenticated(true);
             } else {
-              // Pas de doc Firestore : créer minimal avec daily normalisé
+              // ... (Logique "Pas de doc Firestore" inchangée)
               const minimalUser = {
                 id: uid,
                 firstName: fbUser.displayName?.split(' ')[0] || '',
@@ -212,19 +285,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                 updatedAt: serverTimestamp()
               };
               try {
-                // setDoc (pas updateDoc) car le doc n'existe pas
                 await setDoc(userRef, minimalUser, { merge: true });
               } catch (err) {
                 console.warn('Impossible d\'écrire le doc user (permissions) — fallback local', err);
               }
-              // onSnapshot se redéclenchera après le setDoc, 
-              // donc pas besoin de setUser ici, mais on le laisse par sécurité.
               setUser(minimalUser as any);
               setIsAuthenticated(true);
             }
           } catch (err: any) {
-            console.warn('Erreur dans onSnapshot (user)', err); // Message mis à jour
-            // fallback local minimal user
+            console.warn('Erreur dans onSnapshot (user)', err);
             const fallbackUser = {
               id: uid,
               firstName: fbUser.displayName?.split(' ')[0] || '',
@@ -250,50 +319,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         unsubscribeFromSnapshot();
       }
     };
-    // --- 2. FIN DE LA CORRECTION MAJEURE ---
-  }, []);
+  }, []); // <-- Le tableau de dépendances vide est crucial
 
   const login = async (email: string, password: string) => {
     try {
-      // Le login ne change pas, car onAuthStateChanged s'occupe de charger les données
       await signInWithEmailAndPassword(auth, email, password);
     } catch (error: any) {
-      // Propager erreur pour UI si besoin
       throw error;
     }
   };
 
-  // UNIQUE implémentation de updateUser — remplace toute autre définition du même nom
-  const updateUser = async (patch: any) => {
-    if (!auth.currentUser) {
-      throw new Error('Utilisateur non authentifié');
-    }
-    const uid = auth.currentUser.uid;
-    const userRef = doc(db, 'users', uid);
-    try {
-      const cleaned = removeUndefined(patch);
-      // ajouter updatedAt
-      cleaned.updatedAt = serverTimestamp();
-      
-      // --- CORRECTION : Utiliser updateDoc au lieu de setDoc(merge) ---
-      // C'est plus propre pour les objets imbriqués comme 'daily'
-      // setDoc(merge) peut écraser des sous-champs non spécifiés.
-      await updateDoc(userRef, cleaned);
-
-      // onSnapshot s'occupera de mettre à jour l'état local 'user'
-      // On retire l'ancien 'setUser' manuel
-      
-      return;
-    } catch (err) {
-      console.warn('updateUser failed', err);
-      throw err;
-    }
-  };
-
   const register = async (userData: Partial<User> & { password?: string }) => {
-    // ... (Logique de register inchangée) ...
-    // Note: onAuthStateChanged et onSnapshot géreront le setUser
-    // (le code existant est OK)
     const { email, password, firstName = '', lastName = '', age } = userData as any;
     if (!email || !password) {
       throw new Error('Email et mot de passe requis.');
@@ -304,7 +340,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       const uid = cred.user.uid;
       const userRef = doc(db, 'users', uid);
 
-      // Mettre à jour displayName sur l'utilisateur Firebase (utile si Firestore échoue)
       try {
         await updateProfile(cred.user, { displayName: `${firstName} ${lastName}`.trim() });
       } catch (err) {
@@ -336,18 +371,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         console.warn('Impossible d\'écrire le doc user (permissions) — fallback local', err);
       }
 
-      // (onSnapshot va maintenant gérer la mise à jour de l'état user)
-      // setUser(newUser as any); // (Optionnel, car onSnapshot le fera)
       setIsAuthenticated(true);
     } catch (error: any) {
       const code = error?.code || '';
 
       if (code === 'auth/email-already-in-use') {
-        // Si l'email existe déjà : tenter connexion (comportement antérieur),
-        // puis mettre à jour le doc Firestore si nécessaire (prénom/nom fournis).
         try {
           await signInWithEmailAndPassword(auth, email, password);
-          // after sign-in, ensure Firestore doc has firstName/lastName
           const currentUid = auth.currentUser?.uid;
           if (currentUid) {
             const userRef = doc(db, 'users', currentUid);
@@ -368,7 +398,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                   }
                 }
               } else {
-                // pas de doc -> créer (merge pour sécurité)
                 const docData = {
                   id: currentUid,
                   firstName,
@@ -388,7 +417,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
               console.warn('Erreur lecture userRef après sign-in', err);
             }
           }
-          // (onAuthStateChanged gérera le setUser)
           return;
         } catch (err) {
           throw new Error('Cet e‑mail est déjà utilisé. Mot de passe incorrect ?');
@@ -406,18 +434,18 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const completeOnboarding = async () => {
-    // ... (code inchangé, updateDoc va déclencher onSnapshot) ...
     if (!auth.currentUser) return;
     const uid = auth.currentUser.uid;
     const userRef = doc(db, 'users', uid);
     try {
       await updateDoc(userRef, { isOnboardingComplete: true, updatedAt: serverTimestamp() } as any);
-      // setUser(prev => prev ? ({ ...prev, isOnboardingComplete: true }) : prev); // (Retiré, onSnapshot gère)
     } catch (err: any) {
       console.warn('Impossible de mettre à jour onboarding sur Firestore (permissions) — update local seulement', err);
-      setUser(prev => prev ? ({ ...prev, isOnboardingComplete: true }) : prev); // (On garde le fallback local)
+      setUser(prev => prev ? ({ ...prev, isOnboardingComplete: true }) : prev);
     }
-  };const logout = async () => {
+  };
+  
+  const logout = async () => {
     try {
       await signOut(auth);
       setUser(null);
@@ -456,7 +484,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         updateUser,
         completeOnboarding,
         logout,
-        createProgress, // exposé
+        createProgress,
+        syncStrava, // <-- EXPOSÉ
+        isSyncingStrava, // <-- EXPOSÉ
       }}
     >
       {children}

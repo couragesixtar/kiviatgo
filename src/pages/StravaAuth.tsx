@@ -17,8 +17,6 @@ const StravaAuth = () => {
     const code = searchParams.get('code');
     const scope = searchParams.get('scope');
 
-    // --- DÉBUT DE LA VERSION MISE À JOUR ---
-    // (J'ai remplacé la fonction exchangeToken par celle-ci)
     const exchangeToken = async (code: string) => {
       try {
         setStatus('Appel de la fonction Netlify...');
@@ -27,48 +25,56 @@ const StravaAuth = () => {
           body: JSON.stringify({ code }),
         });
 
-        // --- NOUVEAUX LOGS ---
         console.log("Réponse reçue du serveur. Status:", response.status);
         console.log("Content-Type:", response.headers.get('content-type'));
-        // --- FIN DES NOUVEAUX LOGS ---
 
         if (!response.ok) {
-          // Si la réponse n'est pas OK (ex: 404, 500)
-          // On lit la réponse comme du TEXTE pour voir ce que c'est
           const errorText = await response.text();
           console.error("Réponse d'erreur du serveur (en texte):", errorText);
           
           if (response.status === 404) {
-            throw new Error("Fonction non trouvée (404). Le 'Base directory' sur Netlify est-il bien 'project' ?");
+            throw new Error("Fonction non trouvée (404). Vérifiez le déploiement Netlify.");
           } else {
-            // Si c'est une autre erreur (ex: 500), on l'affiche
-            throw new Error(`Erreur serveur (${response.status}). Réponse: ${errorText.substring(0, 150)}...`);
+            // Tenter de parser l'erreur JSON de Strava
+            let stravaError = "Erreur inconnue";
+            try {
+              const errJson = JSON.parse(errorText);
+              stravaError = errJson.error || JSON.stringify(errJson);
+            } catch(e) {
+              stravaError = errorText.substring(0, 150) + '...';
+            }
+            throw new Error(`Erreur serveur (${response.status}). Réponse: ${stravaError}`);
           }
         }
 
-        // Si response.ok est true, on tente de lire le JSON
         const data = await response.json();
         
         setStatus('Mise à jour de votre profil...');
-        const { totalCalories, lastSync } = data;
+        
+        // --- MODIFICATION : On récupère le refreshToken ---
+        const { totalCalories, lastSync, refreshToken } = data;
+
+        if (!refreshToken) {
+          throw new Error("La réponse du serveur n'a pas fourni de refreshToken. Impossible de continuer.");
+        }
 
         await updateUser({
           daily: {
             stravaRecentCalories: totalCalories,
             stravaLastSync: lastSync,
+            stravaRefreshToken: refreshToken, // <-- ON LE SAUVEGARDE
           },
         });
+        // --- FIN MODIFICATION ---
 
         setStatus('Synchronisation réussie !');
         navigate('/');
 
       } catch (err: any) {
         console.error("Erreur finale attrapée dans exchangeToken:", err);
-        // Affiche l'erreur (ex: "Fonction non trouvée (404)...")
         setError(err.message || 'Une erreur inconnue est survenue.');
       }
     };
-    // --- FIN DE LA VERSION MISE À JOUR ---
 
 
     // Vérifier si l'utilisateur a bien autorisé ce qu'on demandait
@@ -83,10 +89,9 @@ const StravaAuth = () => {
       // L'utilisateur a peut-être cliqué "Annuler"
       setError('Autorisation Strava annulée ou code manquant.');
     }
-  }, [searchParams, navigate, updateUser]);
+  }, [searchParams, navigate, updateUser]); // Dépendances correctes
 
   // Si une erreur survient, on l'affiche et on propose de repartir
-  // Le message d'erreur sera maintenant beaucoup plus clair
   if (error) {
     return (
       <div className="min-h-screen bg-dark-900 flex flex-col items-center justify-center p-6 text-center">

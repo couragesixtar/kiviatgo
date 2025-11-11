@@ -2,17 +2,18 @@
 
 import { useState } from 'react'; // 'useEffect' a été retiré
 import { motion } from 'framer-motion';
-import { User, Scale, Target, LogOut, Save, Loader2 } from 'lucide-react';
+// Icône RefreshCw ajoutée
+import { User, Scale, Target, LogOut, Save, Loader2, RefreshCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { StravaConnect } from '../components/StravaConnect';
 import { useNavigate } from 'react-router-dom';
 
 export const Profile = () => {
-  const { user, updateUser, logout } = useAuth();
+  // Fonctions syncStrava et isSyncingStrava récupérées du contexte
+  const { user, updateUser, logout, syncStrava, isSyncingStrava } = useAuth();
   const navigate = useNavigate();
   
-  // États locaux pour le formulaire, initialisés avec les données de l'utilisateur
-  // C'est suffisant, pas besoin de useEffect pour ça
+  // États locaux pour le formulaire
   const [firstName, setFirstName] = useState(user?.firstName || '');
   const [lastName, setLastName] = useState(user?.lastName || '');
   
@@ -20,7 +21,7 @@ export const Profile = () => {
   const [height, setHeight] = useState(user?.height || '');
   const [weight, setWeight] = useState(user?.weight || '');
   
-  // Objectifs (stockés dans user.daily ou à la racine)
+  // Objectifs
   const [targetWeight, setTargetWeight] = useState((user as any)?.daily?.targetWeight || user?.targetWeight || '');
   const [caloriesTarget, setCaloriesTarget] = useState((user as any)?.daily?.caloriesTarget || '');
   const [proteinTarget, setProteinTarget] = useState((user as any)?.daily?.proteinTarget || '');
@@ -29,15 +30,13 @@ export const Profile = () => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  // --- CORRECTION 1 : Le bloc useEffect qui dépendait de [user] a été supprimé ---
-  // Il était la cause du problème de re-focus des inputs.
+  // Pas de useEffect dépendant de [user] pour les formulaires
 
   const handleSaveProfile = async () => {
     setIsLoading(true);
     setSaveMessage(null);
     try {
       
-      // --- CORRECTION 2 : On récupère l'objet 'daily' existant ---
       const existingDaily = (user as any)?.daily || {};
       
       const updatedData = {
@@ -46,14 +45,12 @@ export const Profile = () => {
         height: Number(height) || undefined,
         weight: Number(weight) || undefined,
         
-        // --- ...et on le fusionne avec les nouvelles valeurs ---
         daily: { 
-          ...existingDaily, // Cela préserve caloriesConsumed, strava, etc.
+          ...existingDaily, // Préserve les données Strava, etc.
           targetWeight: Number(targetWeight) || undefined,
           caloriesTarget: Number(caloriesTarget) || undefined,
           proteinTarget: Number(proteinTarget) || undefined,
         },
-        // On met aussi à jour le 'targetWeight' racine pour l'historique
         targetWeight: Number(targetWeight) || undefined,
       };
       
@@ -72,8 +69,6 @@ export const Profile = () => {
     setIsLoggingOut(true);
     try {
       await logout();
-      // Après logout, AuthProvider redirigera vers AuthWrapper
-      // mais on peut forcer pour plus de réactivité
       navigate('/'); 
     } catch (error) {
       console.error('Erreur déconnexion:', error);
@@ -107,7 +102,7 @@ export const Profile = () => {
 
 
   return (
-    <div className="p-6 pt-12 pb-24"> {/* Ajout padding bottom pour le FAB */}
+    <div className="p-6 pt-12 pb-24"> {/* Padding bottom pour la nav bar */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -219,7 +214,29 @@ export const Profile = () => {
           className="bg-dark-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700/50"
         >
           <h3 className="text-xl font-bold text-white mb-4">Connexions</h3>
+          
           <StravaConnect />
+
+          {/* --- NOUVEAU BLOC DE SYNCHRO MANUELLE --- */}
+          {/* On l'affiche seulement si l'utilisateur est connecté (a un token) */}
+          {(user as any)?.daily?.stravaRefreshToken && (
+            <button
+              onClick={() => syncStrava()} // Appelle la fonction du contexte
+              disabled={isSyncingStrava} // Désactivé si déjà en cours
+              className="w-full mt-3 bg-dark-700/50 text-orange-400 font-medium py-3 px-4 rounded-2xl flex items-center justify-center space-x-2 hover:bg-dark-700 transition-colors duration-200 disabled:opacity-50"
+            >
+              {isSyncingStrava ? (
+                <Loader2 size={20} className="animate-spin" />
+              ) : (
+                <RefreshCw size={20} />
+              )}
+              <span>
+                {isSyncingStrava ? 'Synchro en cours...' : 'Synchroniser Strava'}
+              </span>
+            </button>
+          )}
+          {/* --- FIN DU NOUVEAU BLOC --- */}
+
         </motion.div>
 
         {/* Boutons d'action */}
