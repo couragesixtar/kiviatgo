@@ -5,11 +5,15 @@ import { useAuth } from '../contexts/AuthContext'; // On l'utilise pour savoir s
 export const StravaConnect = () => {
   const { user } = useAuth();
 
-  // On vérifie si l'utilisateur a déjà des données Strava synchronisées
-  const isConnected = !!(user as any)?.daily?.stravaLastSync;
+  // --- CORRECTION ---
+  // On vérifie le REFRESH TOKEN, pas seulement la date de synchro.
+  // C'est le token qui nous permet les synchros futures.
+  const isConnected = !!(user as any)?.daily?.stravaRefreshToken; 
+  const lastSync = (user as any)?.daily?.stravaLastSync;
 
-  if (isConnected) {
-    const lastSyncDate = new Date((user as any).daily.stravaLastSync).toLocaleDateString('fr-FR', {
+  // On affiche "Connecté" SEULEMENT si on a le token ET une date de synchro
+  if (isConnected && lastSync) {
+    const lastSyncDate = new Date(lastSync).toLocaleDateString('fr-FR', {
       day: '2-digit',
       month: '2-digit',
       hour: '2-digit',
@@ -30,15 +34,16 @@ export const StravaConnect = () => {
     );
   }
 
-  // Si pas connecté, on affiche le bouton
+  // Si on arrive ici, c'est que isConnected est false (pas de token).
+  // On affiche le bouton de connexion, MÊME SI une ancienne synchro (stravaLastSync) existe.
   
   // 1. Lire les variables d'environnement
   const clientId = import.meta.env.VITE_STRAVA_CLIENT_ID;
   const redirectUri = import.meta.env.VITE_STRAVA_REDIRECT_URI;
   
   // 2. Définir les "scopes" (ce qu'on veut lire)
-  // 'activity:read' est nécessaire pour les calories et les activités
-  const scope = 'activity:read';
+  // IMPORTANT: On demande 'activity:read_all' et 'refresh_token'
+  const scope = 'activity:read_all,refresh_token';
   
   // 3. Construire l'URL d'autorisation
   const authUrl = `https://www.strava.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
@@ -52,7 +57,8 @@ export const StravaConnect = () => {
     >
       <div className="flex items-center justify-center space-x-2">
         <Activity size={20} />
-        <span>Connecter Strava</span>
+        {/* Si 'lastSync' existe mais 'refreshToken' manque, on sait qu'il faut reconnecter */}
+        <span>{lastSync ? 'Reconnecter Strava (Mise à jour)' : 'Connecter Strava'}</span>
       </div>
     </a>
   );
