@@ -1,6 +1,6 @@
 // src/components/StravaConnect.tsx
 import { Activity } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext'; // On l'utilise pour savoir s'il est déjà connecté
+import { useAuth } from '../contexts/AuthContext';
 
 export const StravaConnect = () => {
   const { user } = useAuth();
@@ -36,16 +36,17 @@ export const StravaConnect = () => {
   const clientId = import.meta.env.VITE_STRAVA_CLIENT_ID;
   const redirectUri = import.meta.env.VITE_STRAVA_REDIRECT_URI;
   
-  // --- CORRECTION ICI ---
-  // Strava utilise des ESPACES, pas des virgules, pour séparer les scopes.
-  // On demande 'activity:read' (pour lire les activités) et 'refresh_token' (pour les synchros futures).
-  const scope = 'activity:read refresh_token';
+  // --- CORRECTION FINALE ---
+  // On demande 'activity:read' (pour lire les activités). C'EST TOUT.
+  // Le 'refresh_token' est renvoyé automatiquement par Strava lors de l'échange de code,
+  // il ne doit pas être dans le scope.
+  const scope = 'activity:read';
   // --- FIN CORRECTION ---
   
   // 3. Construire l'URL d'autorisation
   const authUrl = `https://www.strava.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
     redirectUri
-  )}&response_type=code&scope=${encodeURIComponent(scope)}`;
+  )}&response_type=code&scope=${encodeURIComponent(scope)}`; // On encode le scope corrigé
 
   return (
     <a
