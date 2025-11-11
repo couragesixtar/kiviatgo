@@ -121,25 +121,44 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
               // Normalisation et reset quotidien côté serveur si nécessaire
               const today = new Date().toISOString().slice(0, 10);
+// src/contexts/AuthContext.tsx (dans le onSnapshot)
+
+// ...
               const daily = data.daily ?? {};
               const lastReset = daily.lastResetDate ?? null;
 
               if (lastReset !== today) {
-                const resetDaily = {
-                  caloriesConsumed: 0,
+                
+                // --- C'ÉTAIT LE BUG ---
+                // const resetDaily = {
+                //   caloriesConsumed: 0,
+                //   proteinConsumed: 0,
+                //   // ...
+                // };
+                // await updateDoc(userRef, { daily: resetDaily, ... }); // <--- CELA ÉCRASE LES OBJECTIFS
+                // data.daily = { ...(data.daily || {}), ...resetDaily };
+
+
+                // --- VOICI LA CORRECTION ---
+                const existingDaily = data.daily ?? {}; // Récupère l'existant
+                
+                const mergedDaily = {
+                  ...existingDaily, // Garde les anciens (caloriesTarget, proteinTarget, strava...)
+                  caloriesConsumed: 0, // Réinitialise seulement ce qui est nécessaire
                   proteinConsumed: 0,
                   photosCount: 0,
                   photosDate: today,
                   lastResetDate: today
                 };
+
                 try {
-                  // Persist reset (merge)
-                  // On fait un updateDoc au lieu de setDoc pour être plus léger
-                  // (Cela déclenchera onSnapshot une 2e fois, c'est normal et géré)
-                  await updateDoc(userRef, { daily: resetDaily, updatedAt: serverTimestamp() });
-                  data.daily = { ...(data.daily || {}), ...resetDaily };
+                  // Persiste la fusion
+                  await updateDoc(userRef, { daily: mergedDaily, updatedAt: serverTimestamp() });
+                  data.daily = mergedDaily; // Met à jour l'état local avec la fusion
                 } catch (err) {
                   console.warn('Impossible d\'appliquer reset daily', err);
+                  // En cas d'échec, on garde l'ancien 'daily' pour éviter les bugs
+                  data.daily = daily;
                 }
               } else {
                 // s'assurer que fields existent

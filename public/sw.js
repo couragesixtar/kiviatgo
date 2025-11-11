@@ -1,12 +1,14 @@
-const CACHE_NAME = 'kiviatgo-v1';
+// public/sw.js
+
+const CACHE_NAME = 'kiviatgo-v2'; // IMPORTANT : Change la version du cache
 const urlsToCache = [
   '/',
-  '/static/js/bundle.js',
-  '/static/css/main.css',
-  '/manifest.json'
+  '/manifest.json',
+  '/icon-192.png'
+  // Vite mettra les assets JS/CSS en cache dynamiquement
 ];
 
-// Install event
+// 1. Installation : mise en cache de l'"app shell"
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -14,29 +16,72 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Fetch event
+// 2. Activation : Nettoyage des anciens caches
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE_NAME) {
+            console.log('SW: Suppression de l\'ancien cache', cacheName);
+            return caches.delete(cacheName); // Supprime les caches qui ne sont pas v2
+          }
+        })
+      );
+    }).then(() => self.clients.claim()) // Prend le contrôle immédiatement
+  );
+});
+
+// 3. Fetch : Stratégie "Network-first" pour le HTML, "Cache-first" pour le reste
 self.addEventListener('fetch', (event) => {
+  
+  // Stratégie "Network-first" pour les pages HTML (navigation)
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          // Si le réseau fonctionne, on met en cache la nouvelle version
+          return caches.open(CACHE_NAME).then(cache => {
+            cache.put(event.request, response.clone());
+            return response;
+          });
+        })
+        .catch(() => {
+          // Si le réseau échoue, on prend la version en cache
+          return caches.match(event.request)
+            .then(response => response || caches.match('/')); // Fallback
+        })
+    );
+    return;
+  }
+
+  // Stratégie "Cache-first" pour les autres assets (CSS, JS, Images)
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
-        // Return cached version or fetch from network
+        // 1. Tenter de servir depuis le cache
         if (response) {
           return response;
         }
-        return fetch(event.request).catch(() => {
-          // Return offline page for navigation requests
-          if (event.request.mode === 'navigate') {
-            return new Response(
-              `<html>
-                <body style="font-family: Arial; text-align: center; padding: 50px; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #10b981;">
-                  <h1>🦋 Pas de réseau ?</h1>
-                  <p>Fais 10 pompes le temps que ça revienne 💪</p>
-                </body>
-              </html>`,
-              { headers: { 'Content-Type': 'text/html' } }
-            );
+        
+        // 2. Sinon, aller sur le réseau
+        return fetch(event.request).then(response => {
+          // Si la réponse est valide, on la met en cache pour la prochaine fois
+          if (response && response.status === 200 && response.type === 'basic') {
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(event.request, responseToCache);
+            });
           }
+          return response;
         });
+      })
+      .catch(() => {
+        // Page hors-ligne (uniquement si tout échoue)
+        return new Response(
+          `<html>... (hors-ligne) ...</html>`,
+          { headers: { 'Content-Type': 'text/html' } }
+        );
       })
   );
 });
