@@ -5,13 +5,10 @@ import { useAuth } from '../contexts/AuthContext'; // On l'utilise pour savoir s
 export const StravaConnect = () => {
   const { user } = useAuth();
 
-  // --- CORRECTION ---
-  // On vérifie le REFRESH TOKEN, pas seulement la date de synchro.
-  // C'est le token qui nous permet les synchros futures.
+  // On vérifie le REFRESH TOKEN
   const isConnected = !!(user as any)?.daily?.stravaRefreshToken; 
   const lastSync = (user as any)?.daily?.stravaLastSync;
 
-  // On affiche "Connecté" SEULEMENT si on a le token ET une date de synchro
   if (isConnected && lastSync) {
     const lastSyncDate = new Date(lastSync).toLocaleDateString('fr-FR', {
       day: '2-digit',
@@ -35,15 +32,15 @@ export const StravaConnect = () => {
   }
 
   // Si on arrive ici, c'est que isConnected est false (pas de token).
-  // On affiche le bouton de connexion, MÊME SI une ancienne synchro (stravaLastSync) existe.
   
-  // 1. Lire les variables d'environnement
   const clientId = import.meta.env.VITE_STRAVA_CLIENT_ID;
   const redirectUri = import.meta.env.VITE_STRAVA_REDIRECT_URI;
   
-  // 2. Définir les "scopes" (ce qu'on veut lire)
-  // IMPORTANT: On demande 'activity:read_all' et 'refresh_token'
-  const scope = 'activity:read_all,refresh_token';
+  // --- CORRECTION ICI ---
+  // Strava utilise des ESPACES, pas des virgules, pour séparer les scopes.
+  // On demande 'activity:read' (pour lire les activités) et 'refresh_token' (pour les synchros futures).
+  const scope = 'activity:read refresh_token';
+  // --- FIN CORRECTION ---
   
   // 3. Construire l'URL d'autorisation
   const authUrl = `https://www.strava.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(
